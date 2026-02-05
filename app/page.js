@@ -88,40 +88,73 @@ const CARDS = [
 const TOTAL = CARDS.length;
 const SWIPE_THRESHOLD = 50;
 
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 function useSwipe(onSwipeLeft, onSwipeRight, onTap) {
   const touch = useRef({ startX: 0, startY: 0, startTime: 0 });
   const [offsetX, setOffsetX] = useState(0);
+  const offsetXRef = useRef(0);
   const swiping = useRef(false);
+  const directionLocked = useRef(null);
+  const touchHandled = useRef(false);
 
   const onTouchStart = useCallback((e) => {
     const t = e.touches[0];
     touch.current = { startX: t.clientX, startY: t.clientY, startTime: Date.now() };
     swiping.current = false;
+    directionLocked.current = null;
+    touchHandled.current = false;
+    offsetXRef.current = 0;
     setOffsetX(0);
   }, []);
 
   const onTouchMove = useCallback((e) => {
+    if (!e.touches.length) return;
     const dx = e.touches[0].clientX - touch.current.startX;
     const dy = e.touches[0].clientY - touch.current.startY;
-    // only capture horizontal swipes
-    if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
+    // Lock direction on first significant movement
+    if (!directionLocked.current && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+      directionLocked.current = Math.abs(dx) >= Math.abs(dy) ? "horizontal" : "vertical";
+    }
+    if (directionLocked.current === "horizontal") {
       swiping.current = true;
+      offsetXRef.current = dx;
       setOffsetX(dx);
     }
   }, []);
 
   const onTouchEnd = useCallback(() => {
+    touchHandled.current = true;
+    const ox = offsetXRef.current;
     if (swiping.current) {
-      if (offsetX < -SWIPE_THRESHOLD) onSwipeLeft();
-      else if (offsetX > SWIPE_THRESHOLD) onSwipeRight();
+      if (ox < -SWIPE_THRESHOLD) onSwipeLeft();
+      else if (ox > SWIPE_THRESHOLD) onSwipeRight();
     } else if (Date.now() - touch.current.startTime < 300) {
       onTap();
     }
     swiping.current = false;
+    directionLocked.current = null;
+    offsetXRef.current = 0;
     setOffsetX(0);
-  }, [offsetX, onSwipeLeft, onSwipeRight, onTap]);
+  }, [onSwipeLeft, onSwipeRight, onTap]);
 
-  return { onTouchStart, onTouchMove, onTouchEnd, offsetX };
+  // Gate click to prevent double-fire after touch events
+  const onClick = useCallback(() => {
+    if (touchHandled.current) {
+      touchHandled.current = false;
+      return;
+    }
+    onTap();
+  }, [onTap]);
+
+  return { onTouchStart, onTouchMove, onTouchEnd, onClick, offsetX };
 }
 
 export default function Page() {
@@ -138,15 +171,6 @@ export default function Page() {
   const card = current !== undefined ? CARDS[current] : null;
   const deckLen = deck.length;
   const pct = TOTAL > 0 ? Math.round((known.size / TOTAL) * 100) : 0;
-
-  const shuffle = (arr) => {
-    const a = [...arr];
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
-  };
 
   const go = useCallback((dir) => {
     setIdx(i => {
@@ -171,7 +195,7 @@ export default function Page() {
   const swipeNext = useCallback(() => go(1), [go]);
   const swipePrev = useCallback(() => go(-1), [go]);
 
-  const { onTouchStart, onTouchMove, onTouchEnd, offsetX } = useSwipe(swipeNext, swipePrev, flip);
+  const { onTouchStart, onTouchMove, onTouchEnd, onClick: handleCardClick, offsetX } = useSwipe(swipeNext, swipePrev, flip);
 
   useEffect(() => {
     const h = (e) => {
@@ -270,7 +294,7 @@ export default function Page() {
               onTouchStart={onTouchStart}
               onTouchMove={onTouchMove}
               onTouchEnd={onTouchEnd}
-              onClick={flip}
+              onClick={handleCardClick}
               style={{
                 background: "#fff",
                 border: "1px solid #eaeae8",
