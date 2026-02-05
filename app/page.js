@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 
 const CARDS = [
   { q: "How is psychology defined?", a: "The scientific study of behavior and mental processes." },
@@ -86,6 +86,43 @@ const CARDS = [
 ];
 
 const TOTAL = CARDS.length;
+const SWIPE_THRESHOLD = 50;
+
+function useSwipe(onSwipeLeft, onSwipeRight, onTap) {
+  const touch = useRef({ startX: 0, startY: 0, startTime: 0 });
+  const [offsetX, setOffsetX] = useState(0);
+  const swiping = useRef(false);
+
+  const onTouchStart = useCallback((e) => {
+    const t = e.touches[0];
+    touch.current = { startX: t.clientX, startY: t.clientY, startTime: Date.now() };
+    swiping.current = false;
+    setOffsetX(0);
+  }, []);
+
+  const onTouchMove = useCallback((e) => {
+    const dx = e.touches[0].clientX - touch.current.startX;
+    const dy = e.touches[0].clientY - touch.current.startY;
+    // only capture horizontal swipes
+    if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
+      swiping.current = true;
+      setOffsetX(dx);
+    }
+  }, []);
+
+  const onTouchEnd = useCallback(() => {
+    if (swiping.current) {
+      if (offsetX < -SWIPE_THRESHOLD) onSwipeLeft();
+      else if (offsetX > SWIPE_THRESHOLD) onSwipeRight();
+    } else if (Date.now() - touch.current.startTime < 300) {
+      onTap();
+    }
+    swiping.current = false;
+    setOffsetX(0);
+  }, [offsetX, onSwipeLeft, onSwipeRight, onTap]);
+
+  return { onTouchStart, onTouchMove, onTouchEnd, offsetX };
+}
 
 export default function Page() {
   const [idx, setIdx] = useState(0);
@@ -130,6 +167,12 @@ export default function Page() {
     go(1);
   }, [current, go]);
 
+  const flip = useCallback(() => setFlipped(f => !f), []);
+  const swipeNext = useCallback(() => go(1), [go]);
+  const swipePrev = useCallback(() => go(-1), [go]);
+
+  const { onTouchStart, onTouchMove, onTouchEnd, offsetX } = useSwipe(swipeNext, swipePrev, flip);
+
   useEffect(() => {
     const h = (e) => {
       const tag = e.target.tagName;
@@ -153,36 +196,63 @@ export default function Page() {
   const reset = () => { setKnown(new Set()); setUnknown(new Set()); setIdx(0); setFlipped(false); setMode("study"); };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f8f8f7", fontFamily: "-apple-system, 'Inter', system-ui, sans-serif", color: "#1a1a1a" }}>
-      <div style={{ maxWidth: 540, margin: "0 auto", padding: "48px 20px 80px" }}>
-
-        <div style={{ marginBottom: 36 }}>
-          <h1 style={{ fontSize: 21, fontWeight: 600, margin: 0, letterSpacing: "-0.03em" }}>Psych Exam Review</h1>
-          <p style={{ fontSize: 13, color: "#999", margin: "6px 0 0" }}>{TOTAL} cards · History & Perspectives · Research Methods</p>
+    <div style={{
+      minHeight: "100dvh",
+      background: "#f8f8f7",
+      fontFamily: "-apple-system, 'Inter', system-ui, sans-serif",
+      color: "#1a1a1a",
+    }}>
+      <div style={{
+        maxWidth: 540,
+        margin: "0 auto",
+        padding: "max(24px, env(safe-area-inset-top) + 12px) 16px max(40px, env(safe-area-inset-bottom) + 16px)",
+      }}>
+        <div style={{ marginBottom: 28 }}>
+          <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0, letterSpacing: "-0.03em" }}>
+            Psych Exam Review
+          </h1>
+          <p style={{ fontSize: 13, color: "#999", margin: "4px 0 0" }}>
+            {TOTAL} cards · History & Perspectives · Research Methods
+          </p>
         </div>
 
         {/* Progress */}
-        <div style={{ marginBottom: 28 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#aaa", marginBottom: 6 }}>
+        <div style={{ marginBottom: 22 }}>
+          <div style={{
+            display: "flex", justifyContent: "space-between",
+            fontSize: 12, color: "#aaa", marginBottom: 6,
+          }}>
             <span>{known.size} known</span>
             <span style={{ fontVariantNumeric: "tabular-nums" }}>{pct}%</span>
             <span>{unknown.size} missed</span>
           </div>
           <div style={{ height: 2, background: "#e6e6e4", borderRadius: 1 }}>
-            <div style={{ height: "100%", width: `${pct}%`, background: "#1a1a1a", borderRadius: 1, transition: "width 0.4s ease" }} />
+            <div style={{
+              height: "100%", width: `${pct}%`,
+              background: "#1a1a1a", borderRadius: 1,
+              transition: "width 0.4s ease",
+            }} />
           </div>
         </div>
 
         {/* Toolbar */}
-        <div style={{ display: "flex", gap: 6, marginBottom: 28, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 22, flexWrap: "wrap" }}>
           {mode === "study" ? (
-            <Pill onClick={() => { if (unknown.size > 0) { setMode("review"); setIdx(0); setFlipped(false); } }} disabled={unknown.size === 0} active={false}>
+            <Pill
+              onClick={() => { if (unknown.size > 0) { setMode("review"); setIdx(0); setFlipped(false); } }}
+              disabled={unknown.size === 0}
+              active={false}
+            >
               Review missed · {unknown.size}
             </Pill>
           ) : (
-            <Pill onClick={() => { setMode("study"); setIdx(0); setFlipped(false); }} active>← All cards</Pill>
+            <Pill onClick={() => { setMode("study"); setIdx(0); setFlipped(false); }} active>
+              All cards
+            </Pill>
           )}
-          <Pill onClick={toggleShuffle} active={shuffled}>{shuffled ? "Shuffled" : "Shuffle"}</Pill>
+          <Pill onClick={toggleShuffle} active={shuffled}>
+            {shuffled ? "Shuffled" : "Shuffle"}
+          </Pill>
           <Pill onClick={reset}>Reset</Pill>
         </div>
 
@@ -190,17 +260,22 @@ export default function Page() {
         {!card ? (
           <div style={{ textAlign: "center", padding: "80px 20px" }}>
             <p style={{ fontSize: 17, fontWeight: 500 }}>All done!</p>
-            <p style={{ fontSize: 13, color: "#999", marginTop: 4 }}>No cards left to review.</p>
+            <p style={{ fontSize: 13, color: "#999", marginTop: 4 }}>
+              No cards left to review.
+            </p>
           </div>
         ) : (
           <>
             <div
-              onClick={() => setFlipped(f => !f)}
+              onTouchStart={onTouchStart}
+              onTouchMove={onTouchMove}
+              onTouchEnd={onTouchEnd}
+              onClick={flip}
               style={{
                 background: "#fff",
                 border: "1px solid #eaeae8",
                 borderRadius: 14,
-                padding: "44px 32px 40px",
+                padding: "40px 24px 36px",
                 minHeight: 200,
                 cursor: "pointer",
                 display: "flex",
@@ -209,10 +284,14 @@ export default function Page() {
                 position: "relative",
                 userSelect: "none",
                 boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
+                touchAction: "pan-y",
+                transform: offsetX ? `translateX(${offsetX * 0.5}px) rotate(${offsetX * 0.02}deg)` : "none",
+                transition: offsetX ? "none" : "transform 0.25s ease",
+                opacity: offsetX ? Math.max(0.6, 1 - Math.abs(offsetX) / 400) : 1,
               }}
             >
               <span style={{
-                position: "absolute", top: 18, left: 24,
+                position: "absolute", top: 16, left: 20,
                 fontSize: 10, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase",
                 color: flipped ? "#22863a" : "#c0c0bc",
               }}>
@@ -220,7 +299,7 @@ export default function Page() {
               </span>
 
               <p style={{
-                fontSize: 16, lineHeight: 1.75, margin: 0,
+                fontSize: 16, lineHeight: 1.7, margin: 0,
                 whiteSpace: "pre-line",
                 color: flipped ? "#2b2b2b" : "#1a1a1a",
                 fontWeight: flipped ? 400 : 500,
@@ -229,28 +308,43 @@ export default function Page() {
               </p>
 
               <span style={{
-                position: "absolute", bottom: 16, right: 24,
+                position: "absolute", bottom: 14, right: 20,
                 fontSize: 10, color: "#d5d5d0",
               }}>
-                space to flip
+                tap to flip
               </span>
             </div>
 
             {/* Nav row */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 14, gap: 12 }}>
+            <div style={{
+              display: "flex", alignItems: "center",
+              justifyContent: "space-between", marginTop: 12, gap: 12,
+            }}>
               <NavBtn onClick={() => go(-1)} disabled={idx === 0}>←</NavBtn>
-              <span style={{ fontSize: 13, color: "#bbb", fontVariantNumeric: "tabular-nums", minWidth: 60, textAlign: "center" }}>{idx + 1} / {deckLen}</span>
+              <span style={{
+                fontSize: 13, color: "#bbb",
+                fontVariantNumeric: "tabular-nums", minWidth: 60, textAlign: "center",
+              }}>
+                {idx + 1} / {deckLen}
+              </span>
               <NavBtn onClick={() => go(1)} disabled={idx >= deckLen - 1}>→</NavBtn>
             </div>
 
             {/* Mark buttons */}
             <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-              <ActionBtn onClick={() => mark("known")} bg="#f2f9f4" border="#cfe8d4" color="#1a7f37">Got it · 1</ActionBtn>
-              <ActionBtn onClick={() => mark("unknown")} bg="#fef5f5" border="#f5d0d0" color="#cf222e">Study more · 2</ActionBtn>
+              <ActionBtn onClick={() => mark("known")} bg="#f2f9f4" border="#cfe8d4" color="#1a7f37">
+                Got it
+              </ActionBtn>
+              <ActionBtn onClick={() => mark("unknown")} bg="#fef5f5" border="#f5d0d0" color="#cf222e">
+                Study more
+              </ActionBtn>
             </div>
 
-            <p style={{ textAlign: "center", marginTop: 24, fontSize: 11, color: "#d0d0cc", letterSpacing: "0.02em" }}>
-              ← → navigate · space flip · 1 got it · 2 study more
+            <p style={{
+              textAlign: "center", marginTop: 20,
+              fontSize: 11, color: "#d0d0cc", letterSpacing: "0.02em",
+            }}>
+              swipe or tap card · buttons below to mark
             </p>
           </>
         )}
@@ -262,11 +356,11 @@ export default function Page() {
 function Pill({ onClick, disabled, active, children }) {
   return (
     <button onClick={onClick} disabled={disabled} style={{
-      padding: "6px 14px", borderRadius: 100,
+      padding: "7px 16px", borderRadius: 100,
       border: active ? "1px solid #1a1a1a" : "1px solid #ddd",
       background: active ? "#1a1a1a" : "#fff",
       color: active ? "#fff" : "#777",
-      fontSize: 12, fontWeight: 500, cursor: disabled ? "default" : "pointer",
+      fontSize: 13, fontWeight: 500, cursor: disabled ? "default" : "pointer",
       opacity: disabled ? 0.3 : 1, transition: "all 0.15s", whiteSpace: "nowrap",
     }}>{children}</button>
   );
@@ -275,9 +369,9 @@ function Pill({ onClick, disabled, active, children }) {
 function NavBtn({ onClick, disabled, children }) {
   return (
     <button onClick={onClick} disabled={disabled} style={{
-      width: 44, height: 44, borderRadius: 10,
+      width: 48, height: 48, borderRadius: 12,
       border: "1px solid #eaeae8", background: "#fff",
-      color: "#1a1a1a", fontSize: 16, fontWeight: 500,
+      color: "#1a1a1a", fontSize: 18, fontWeight: 500,
       cursor: disabled ? "default" : "pointer",
       opacity: disabled ? 0.2 : 1, transition: "all 0.15s",
       display: "flex", alignItems: "center", justifyContent: "center",
@@ -288,9 +382,9 @@ function NavBtn({ onClick, disabled, children }) {
 function ActionBtn({ onClick, bg, border, color, children }) {
   return (
     <button onClick={onClick} style={{
-      flex: 1, padding: "13px 0", borderRadius: 10,
+      flex: 1, padding: "14px 0", borderRadius: 12,
       border: `1px solid ${border}`, background: bg,
-      color, fontWeight: 600, fontSize: 14, cursor: "pointer",
+      color, fontWeight: 600, fontSize: 15, cursor: "pointer",
       transition: "all 0.15s",
     }}>{children}</button>
   );
